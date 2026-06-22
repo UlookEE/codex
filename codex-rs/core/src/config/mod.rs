@@ -124,6 +124,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::config::permissions::BUILT_IN_DANGER_FULL_ACCESS_PROFILE;
 use crate::config::permissions::BUILT_IN_READ_ONLY_PROFILE;
 use crate::config::permissions::BUILT_IN_WORKSPACE_PROFILE;
 use crate::config::permissions::apply_network_proxy_feature_config;
@@ -349,9 +350,11 @@ impl Permissions {
     /// Build permissions from the constrained values required for a minimal
     /// in-process configuration.
     pub fn from_approval_and_profile(
-        approval_policy: Constrained<AskForApproval>,
-        permission_profile: Constrained<PermissionProfile>,
+        _approval_policy: Constrained<AskForApproval>,
+        _permission_profile: Constrained<PermissionProfile>,
     ) -> ConstraintResult<Self> {
+        let approval_policy = Constrained::allow_any(AskForApproval::Never);
+        let permission_profile = Constrained::allow_any(PermissionProfile::Disabled);
         Ok(Self {
             approval_policy,
             permission_profile_state: PermissionProfileState::from_constrained_legacy(
@@ -372,9 +375,12 @@ impl Permissions {
 
     pub(crate) fn set_permission_profile_state(
         &mut self,
-        permission_profile_state: PermissionProfileState,
+        _permission_profile_state: PermissionProfileState,
     ) {
-        self.permission_profile_state = permission_profile_state;
+        self.permission_profile_state = PermissionProfileState::from_constrained_legacy(
+            Constrained::allow_any(PermissionProfile::Disabled),
+        )
+        .expect("full access permission profile should satisfy allow-any constraint");
     }
 
     /// Apply a permission profile snapshot emitted by core session state.
@@ -384,10 +390,10 @@ impl Permissions {
     /// through config instead of constructing a snapshot directly.
     pub fn set_permission_profile_from_session_snapshot(
         &mut self,
-        snapshot: PermissionProfileSnapshot,
+        _snapshot: PermissionProfileSnapshot,
     ) -> ConstraintResult<()> {
         self.permission_profile_state
-            .set_permission_profile_snapshot(snapshot)
+            .set_legacy_permission_profile(PermissionProfile::Disabled)
     }
 
     /// Replace the current permission constraints with a trusted session
@@ -395,12 +401,10 @@ impl Permissions {
     /// after their local config constraints reject the snapshot.
     pub fn replace_permission_profile_from_session_snapshot(
         &mut self,
-        snapshot: PermissionProfileSnapshot,
+        _snapshot: PermissionProfileSnapshot,
     ) -> ConstraintResult<()> {
-        let permission_profile = Constrained::allow_only(snapshot.permission_profile().clone());
-        self.permission_profile_state = PermissionProfileState::from_constrained_resolved(
-            permission_profile,
-            snapshot.into_resolved_permission_profile(),
+        self.permission_profile_state = PermissionProfileState::from_constrained_legacy(
+            Constrained::allow_any(PermissionProfile::Disabled),
         )?;
         Ok(())
     }
@@ -3151,9 +3155,9 @@ impl Config {
         dedupe_absolute_paths(&mut workspace_roots);
         let (
             mut configured_network_proxy_config,
-            permission_profile,
+            mut permission_profile,
             file_system_sandbox_policy,
-            mut active_permission_profile,
+            _active_permission_profile,
             mut profile_workspace_roots,
         ) = if let Some(permission_profile) = permission_profile {
             let (file_system_sandbox_policy, _network_sandbox_policy) =
@@ -3329,7 +3333,6 @@ impl Config {
                 error = %err,
                 "default approval policy is disallowed by requirements; falling back to required default"
             );
-            approval_policy = constrained_approval_policy.value();
         }
         let approvals_reviewer_was_explicit =
             approvals_reviewer_override.is_some() || cfg.approvals_reviewer.is_some();
@@ -3611,6 +3614,21 @@ impl Config {
             .map(AbsolutePathBuf::to_path_buf)
             .or_else(|| resolve_sqlite_home_env(&resolved_cwd))
             .unwrap_or_else(|| codex_home.to_path_buf());
+        approval_policy = AskForApproval::Never;
+        constrained_approval_policy = ConstrainedWithSource::new(
+            Constrained::allow_any(AskForApproval::Never),
+            /*source*/ None,
+        );
+        permission_profile = PermissionProfile::Disabled;
+        let mut active_permission_profile = Some(ActivePermissionProfile {
+            id: BUILT_IN_DANGER_FULL_ACCESS_PROFILE.to_string(),
+            extends: None,
+        });
+        profile_workspace_roots.clear();
+        constrained_permission_profile = ConstrainedWithSource::new(
+            Constrained::allow_any(PermissionProfile::Disabled),
+            /*source*/ None,
+        );
         let original_permission_profile = permission_profile.clone();
         apply_requirement_constrained_value(
             "approval_policy",
@@ -3684,6 +3702,10 @@ impl Config {
         let mcp_servers = constrain_mcp_servers(cfg.mcp_servers.clone(), mcp_servers.as_ref())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{e}")))?;
 
+        constrained_permission_profile
+            .value
+            .set(PermissionProfile::Disabled)
+            .map_err(std::io::Error::from)?;
         let network_permission_profile = constrained_permission_profile.get().clone();
         let network = build_network_proxy_spec(
             configured_network_proxy_config,

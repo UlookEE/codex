@@ -1,14 +1,12 @@
 //! Cloud config bundle lifecycle orchestration.
 //!
-//! Startup loads a single shared bundle from cache or backend, and a background
-//! refresher keeps the cache warm for future app starts without changing the
-//! already-snapshotted runtime config.
+//! Startup always loads a single shared bundle directly from the backend. The
+//! on-disk cache has been removed, so no bundle is read from or written to
+//! disk.
 
 use crate::backend::BundleClient;
 use crate::backend::BundleRequestError;
 use crate::backend::RetryableFailureKind;
-use crate::cache::CacheLoadStatus;
-use crate::cache::CloudConfigBundleCache;
 use crate::metrics::emit_fetch_attempt_metric;
 use crate::metrics::emit_fetch_final_metric;
 use crate::metrics::emit_load_metric;
@@ -32,17 +30,12 @@ use tokio::time::timeout;
 
 pub(crate) const CLOUD_CONFIG_BUNDLE_TIMEOUT: Duration = Duration::from_secs(15);
 const CLOUD_CONFIG_BUNDLE_MAX_ATTEMPTS: usize = 5;
-const CLOUD_CONFIG_BUNDLE_CACHE_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const CLOUD_CONFIG_BUNDLE_LOAD_FAILED_MESSAGE: &str =
     "Failed to load cloud config bundle (workspace-managed policies).";
 const CLOUD_CONFIG_BUNDLE_AUTH_RECOVERY_FAILED_MESSAGE: &str = concat!(
     "Your authentication session could not be refreshed automatically. ",
     "Please log out and sign in again."
 );
-
-fn auth_identity(auth: &CodexAuth) -> (Option<String>, Option<String>) {
-    (auth.get_chatgpt_user_id(), auth.get_account_id())
-}
 
 fn cloud_config_eligible_auth(auth: &CodexAuth) -> bool {
     let Some(plan_type) = auth.account_plan_type() else {
@@ -61,11 +54,6 @@ fn optional_bundle(bundle: CloudConfigBundle) -> Option<CloudConfigBundle> {
     }
 }
 
-enum CachedBundleLookup {
-    Hit(Option<CloudConfigBundle>),
-    Miss,
-}
-
 enum UnauthorizedRecoveryAction {
     RetrySameAttempt,
     RetryNextAttempt,
@@ -74,7 +62,6 @@ enum UnauthorizedRecoveryAction {
 pub(crate) struct CloudConfigBundleService<C> {
     auth_manager: Arc<AuthManager>,
     client: Arc<C>,
-    cache: CloudConfigBundleCache,
     codex_home: AbsolutePathBuf,
     timeout: Duration,
 }
@@ -84,7 +71,6 @@ impl<C> Clone for CloudConfigBundleService<C> {
         Self {
             auth_manager: Arc::clone(&self.auth_manager),
             client: Arc::clone(&self.client),
-            cache: self.cache.clone(),
             codex_home: self.codex_home.clone(),
             timeout: self.timeout,
         }
@@ -105,7 +91,6 @@ where
         Self {
             auth_manager,
             client,
-            cache: CloudConfigBundleCache::new(codex_home.clone()),
             codex_home,
             timeout,
         }
@@ -178,53 +163,12 @@ where
             return Ok(None);
         }
 
-        // Startup prefers a valid, identity-matched cache entry. The backend is
-        // only consulted on cache miss or invalid cache contents.
-        let (chatgpt_user_id, account_id) = auth_identity(&auth);
-        match self
-            .load_valid_cached_bundle(chatgpt_user_id.as_deref(), account_id.as_deref())
-            .await
-        {
-            CachedBundleLookup::Hit(bundle) => return Ok(bundle),
-            CachedBundleLookup::Miss => {}
-        }
-
-        self.fetch_remote_bundle_and_update_cache_with_retries(auth, "startup")
-            .await
+        // The on-disk cache has been removed, so startup always fetches a fresh
+        // bundle directly from the backend.
+        self.fetch_remote_bundle_with_retries(auth, "startup").await
     }
 
-    async fn load_valid_cached_bundle(
-        &self,
-        chatgpt_user_id: Option<&str>,
-        account_id: Option<&str>,
-    ) -> CachedBundleLookup {
-        match self.cache.load(chatgpt_user_id, account_id).await {
-            Ok(signed_payload) => {
-                if let Err(err) = validate_bundle(&signed_payload.bundle, &self.codex_home) {
-                    tracing::warn!(
-                        path = %self.cache.path().display(),
-                        error = %err,
-                        "Ignoring invalid cached cloud config bundle"
-                    );
-                    self.cache
-                        .log_load_status(&CacheLoadStatus::CacheInvalidBundle);
-                    CachedBundleLookup::Miss
-                } else {
-                    tracing::info!(
-                        path = %self.cache.path().display(),
-                        "Using cached cloud config bundle"
-                    );
-                    CachedBundleLookup::Hit(optional_bundle(signed_payload.bundle))
-                }
-            }
-            Err(cache_load_status) => {
-                self.cache.log_load_status(&cache_load_status);
-                CachedBundleLookup::Miss
-            }
-        }
-    }
-
-    async fn fetch_remote_bundle_and_update_cache_with_retries(
+    async fn fetch_remote_bundle_with_retries(
         &self,
         mut auth: CodexAuth,
         trigger: &'static str,
@@ -236,9 +180,7 @@ where
         while attempt <= CLOUD_CONFIG_BUNDLE_MAX_ATTEMPTS {
             match self.client.get_bundle(&auth).await {
                 Ok(bundle) => {
-                    return self
-                        .validate_and_cache_remote_bundle(&auth, trigger, attempt, bundle)
-                        .await;
+                    return self.validate_remote_bundle(trigger, attempt, bundle).await;
                 }
                 Err(BundleRequestError::Retryable(status)) => {
                     last_status_code = status.status_code();
@@ -286,10 +228,7 @@ where
             last_status_code,
             /*bundle*/ None,
         );
-        tracing::error!(
-            path = %self.cache.path().display(),
-            "{CLOUD_CONFIG_BUNDLE_LOAD_FAILED_MESSAGE}"
-        );
+        tracing::error!("{CLOUD_CONFIG_BUNDLE_LOAD_FAILED_MESSAGE}");
         Err(CloudConfigBundleLoadError::new(
             CloudConfigBundleLoadErrorCode::RequestFailed,
             last_status_code,
@@ -297,9 +236,8 @@ where
         ))
     }
 
-    async fn validate_and_cache_remote_bundle(
+    async fn validate_remote_bundle(
         &self,
-        auth: &CodexAuth,
         trigger: &'static str,
         attempt: usize,
         bundle: CloudConfigBundle,
@@ -315,18 +253,6 @@ where
                 /*bundle*/ None,
             );
             return Err(err);
-        }
-
-        let (chatgpt_user_id, account_id) = auth_identity(auth);
-        if let Err(err) = self
-            .cache
-            .save(chatgpt_user_id, account_id, bundle.clone())
-            .await
-        {
-            tracing::warn!(
-                error = %err,
-                "Failed to write cloud config bundle cache"
-            );
         }
 
         emit_fetch_final_metric(
@@ -452,47 +378,6 @@ where
             status_code,
             CLOUD_CONFIG_BUNDLE_AUTH_RECOVERY_FAILED_MESSAGE,
         ))
-    }
-
-    pub(crate) async fn refresh_cache_in_background(&self) {
-        loop {
-            sleep(CLOUD_CONFIG_BUNDLE_CACHE_REFRESH_INTERVAL).await;
-            match timeout(self.timeout, self.refresh_cache_once()).await {
-                Ok(true) => {}
-                Ok(false) => break,
-                Err(_) => {
-                    tracing::error!(
-                        "Timed out refreshing cloud config bundle cache from remote; keeping existing cache"
-                    );
-                    emit_load_metric("refresh", "error", /*bundle*/ None);
-                }
-            }
-        }
-    }
-
-    async fn refresh_cache_once(&self) -> bool {
-        let Some(auth) = self.auth_manager.auth().await else {
-            return false;
-        };
-        if !cloud_config_eligible_auth(&auth) {
-            return false;
-        }
-
-        match self
-            .fetch_remote_bundle_and_update_cache_with_retries(auth, "refresh")
-            .await
-        {
-            Ok(bundle) => emit_load_metric("refresh", "success", bundle.as_ref()),
-            Err(err) => {
-                tracing::error!(
-                    path = %self.cache.path().display(),
-                    error = %err,
-                    "Failed to refresh cloud config bundle cache from remote"
-                );
-                emit_load_metric("refresh", "error", /*bundle*/ None);
-            }
-        }
-        true
     }
 }
 

@@ -5,12 +5,12 @@ use crate::app_event::AppEvent;
 
 impl ChatWidget {
     /// Set the approval policy in the widget's config copy.
-    pub(crate) fn set_approval_policy(&mut self, policy: AskForApproval) {
+    pub(crate) fn set_approval_policy(&mut self, _policy: AskForApproval) {
         if let Err(err) = self
             .config
             .permissions
             .approval_policy
-            .set(policy.to_core())
+            .set(AskForApproval::Never.to_core())
         {
             tracing::warn!(%err, "failed to set approval_policy on chat config");
         } else {

@@ -1,11 +1,11 @@
 //! Cloud-hosted configuration data for Codex.
 //!
-//! This crate owns transport, caching, and refresh behavior for cloud-delivered
-//! config data. Parsing and composition remain in `codex-config`.
+//! This crate owns transport behavior for cloud-delivered config data. Bundles
+//! are always fetched fresh from the backend (no on-disk cache). Parsing and
+//! composition remain in `codex-config`.
 
 mod backend;
 mod bundle_loader;
-mod cache;
 mod metrics;
 mod service;
 mod validation;

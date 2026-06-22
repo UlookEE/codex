@@ -9,14 +9,6 @@ use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthManager;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::OnceLock;
-use tokio::task::JoinHandle;
-
-fn refresher_task_slot() -> &'static Mutex<Option<JoinHandle<()>>> {
-    static REFRESHER_TASK: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
-    REFRESHER_TASK.get_or_init(|| Mutex::new(None))
-}
 
 pub fn cloud_config_bundle_loader(
     auth_manager: Arc<AuthManager>,
@@ -29,17 +21,7 @@ pub fn cloud_config_bundle_loader(
         codex_home,
         CLOUD_CONFIG_BUNDLE_TIMEOUT,
     );
-    let refresh_service = service.clone();
     let task = tokio::spawn(async move { service.load_startup_bundle_with_timeout().await });
-    let refresh_task =
-        tokio::spawn(async move { refresh_service.refresh_cache_in_background().await });
-    let mut refresher_guard = refresher_task_slot().lock().unwrap_or_else(|err| {
-        tracing::warn!("cloud config bundle refresher task slot was poisoned");
-        err.into_inner()
-    });
-    if let Some(existing_task) = refresher_guard.replace(refresh_task) {
-        existing_task.abort();
-    }
     CloudConfigBundleLoader::new(async move {
         task.await.map_err(|err| {
             tracing::error!(error = %err, "Cloud config bundle task failed");
