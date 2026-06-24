@@ -641,12 +641,12 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadTurnsListResponse,
     },
-    #[experimental("thread/turns/items/list")]
-    ThreadTurnsItemsList => "thread/turns/items/list" {
-        params: v2::ThreadTurnsItemsListParams,
+    #[experimental("thread/items/list")]
+    ThreadItemsList => "thread/items/list" {
+        params: v2::ThreadItemsListParams,
         // Explicitly concurrent: this primarily reads append-only rollout storage.
         serialization: None,
-        response: v2::ThreadTurnsItemsListResponse,
+        response: v2::ThreadItemsListResponse,
     },
     /// Append raw Responses API items to the thread history without starting a user turn.
     ThreadInjectItems => "thread/inject_items" {
@@ -1020,6 +1020,12 @@ client_request_definitions! {
         params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
         serialization: None,
         response: v2::GetAccountTokenUsageResponse,
+    },
+
+    GetWorkspaceMessages => "account/workspaceMessages/read" {
+        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        serialization: None,
+        response: v2::GetWorkspaceMessagesResponse,
     },
 
     SendAddCreditsNudgeEmail => "account/sendAddCreditsNudgeEmail" {
@@ -2084,17 +2090,17 @@ mod tests {
         };
         assert_eq!(thread_turns_list.serialization_scope(), None);
 
-        let thread_turns_items_list = ClientRequest::ThreadTurnsItemsList {
+        let thread_items_list = ClientRequest::ThreadItemsList {
             request_id: request_id(),
-            params: v2::ThreadTurnsItemsListParams {
+            params: v2::ThreadItemsListParams {
                 thread_id: "thread-1".to_string(),
-                turn_id: "turn-1".to_string(),
+                turn_id: None,
                 cursor: None,
                 limit: None,
                 sort_direction: None,
             },
         };
-        assert_eq!(thread_turns_items_list.serialization_scope(), None);
+        assert_eq!(thread_items_list.serialization_scope(), None);
 
         let mcp_resource_read = ClientRequest::McpResourceRead {
             request_id: request_id(),
@@ -2542,6 +2548,24 @@ mod tests {
     }
 
     #[test]
+    fn serialize_get_workspace_messages() -> Result<()> {
+        let request = ClientRequest::GetWorkspaceMessages {
+            request_id: RequestId::Integer(1),
+            params: None,
+        };
+        assert_eq!(request.id(), &RequestId::Integer(1));
+        assert_eq!(request.method(), "account/workspaceMessages/read");
+        assert_eq!(
+            json!({
+                "method": "account/workspaceMessages/read",
+                "id": 1,
+            }),
+            serde_json::to_value(&request)?,
+        );
+        Ok(())
+    }
+
+    #[test]
     fn serialize_client_response() -> Result<()> {
         let cwd = absolute_path("/tmp");
         let response = ClientResponse::ThreadStart {
@@ -2549,6 +2573,7 @@ mod tests {
             response: v2::ThreadStartResponse {
                 thread: v2::Thread {
                     id: "67e55044-10b1-426f-9247-bb680e5fe0c8".to_string(),
+                    extra: None,
                     session_id: "67e55044-10b1-426f-9247-bb680e5fe0c7".to_string(),
                     forked_from_id: None,
                     parent_thread_id: None,
@@ -2580,7 +2605,7 @@ mod tests {
                         "/tmp/AGENTS.md",
                     )),
                 ],
-                approval_policy: v2::AskForApproval::OnFailure,
+                approval_policy: v2::AskForApproval::OnRequest,
                 approvals_reviewer: v2::ApprovalsReviewer::User,
                 sandbox: v2::SandboxPolicy::DangerFullAccess,
                 active_permission_profile: None,
@@ -2598,6 +2623,7 @@ mod tests {
                 "response": {
                     "thread": {
                         "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                        "extra": null,
                         "sessionId": "67e55044-10b1-426f-9247-bb680e5fe0c7",
                         "forkedFromId": null,
                         "parentThreadId": null,
@@ -2627,7 +2653,7 @@ mod tests {
                     "cwd": absolute_path_string("tmp"),
                     "runtimeWorkspaceRoots": [],
                     "instructionSources": [absolute_path_string("tmp/AGENTS.md")],
-                    "approvalPolicy": "on-failure",
+                    "approvalPolicy": "on-request",
                     "approvalsReviewer": "user",
                     "sandbox": {
                         "type": "dangerFullAccess"
@@ -2830,7 +2856,7 @@ mod tests {
         );
 
         let chatgpt = v2::Account::Chatgpt {
-            email: "user@example.com".to_string(),
+            email: Some("user@example.com".to_string()),
             plan_type: PlanType::Plus,
         };
         assert_eq!(
@@ -2840,6 +2866,19 @@ mod tests {
                 "planType": "plus",
             }),
             serde_json::to_value(&chatgpt)?,
+        );
+
+        let chatgpt_without_email = v2::Account::Chatgpt {
+            email: None,
+            plan_type: PlanType::Pro,
+        };
+        assert_eq!(
+            json!({
+                "type": "chatgpt",
+                "email": null,
+                "planType": "pro",
+            }),
+            serde_json::to_value(&chatgpt_without_email)?,
         );
 
         let codex_managed_bedrock = v2::Account::AmazonBedrock {
@@ -3355,9 +3394,11 @@ mod tests {
             v2::ModelSafetyBufferingUpdatedNotification {
                 thread_id: "thr_123".to_string(),
                 turn_id: "turn_123".to_string(),
-                model: "gpt-5.4".to_string(),
+                model: "current-model".to_string(),
                 use_cases: vec!["cyber".to_string()],
                 reasons: vec!["user_risk".to_string()],
+                show_buffering_ui: true,
+                faster_model: Some("faster-model".to_string()),
             },
         );
         assert_eq!(
@@ -3366,9 +3407,11 @@ mod tests {
                 "params": {
                     "threadId": "thr_123",
                     "turnId": "turn_123",
-                    "model": "gpt-5.4",
+                    "model": "current-model",
                     "useCases": ["cyber"],
-                    "reasons": ["user_risk"]
+                    "reasons": ["user_risk"],
+                    "showBufferingUi": true,
+                    "fasterModel": "faster-model"
                 }
             }),
             serde_json::to_value(&notification)?,

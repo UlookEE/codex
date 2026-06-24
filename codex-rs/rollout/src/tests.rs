@@ -1290,6 +1290,7 @@ async fn test_updated_at_uses_file_mtime() -> Result<()> {
                 dynamic_tools: None,
                 memory_mode: None,
                 multi_agent_version: None,
+                context_window: None,
             },
             git: None,
         }),
@@ -1320,7 +1321,7 @@ async fn test_updated_at_uses_file_mtime() -> Result<()> {
                     text: format!("reply-{idx}"),
                 }],
                 phase: None,
-                metadata: None,
+                internal_chat_message_metadata_passthrough: None,
             }),
         };
         writeln!(file, "{}", serde_json::to_string(&response_line)?)?;

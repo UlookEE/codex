@@ -191,7 +191,7 @@ mod tests {
                 text: "hello from response item".to_string(),
             }],
             phase: None,
-            metadata: None,
+            internal_chat_message_metadata_passthrough: None,
         });
 
         apply_rollout_item(&mut metadata, &item, "test-provider");
@@ -341,6 +341,7 @@ mod tests {
                     dynamic_tools: None,
                     memory_mode: None,
                     multi_agent_version: None,
+                    context_window: None,
                 },
                 git: None,
             }),
@@ -532,6 +533,7 @@ mod tests {
                     dynamic_tools: None,
                     memory_mode: None,
                     multi_agent_version: None,
+                    context_window: None,
                 },
                 git: None,
             }),

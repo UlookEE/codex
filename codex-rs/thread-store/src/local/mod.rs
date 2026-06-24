@@ -513,7 +513,7 @@ mod tests {
                     id: None,
                     call_id: "call-1".to_string(),
                     output: FunctionCallOutputPayload::from_text("tool output".to_string()),
-                    metadata: None,
+                    internal_chat_message_metadata_passthrough: None,
                 }),
                 RolloutItem::EventMsg(EventMsg::TokenCount(
                     codex_protocol::protocol::TokenCountEvent {
@@ -1130,9 +1130,11 @@ mod tests {
             parent_thread_id: None,
             source: SessionSource::Exec,
             thread_source: None,
+            originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),
             dynamic_tools: Vec::new(),
             multi_agent_version: None,
+            initial_window_id: uuid::Uuid::now_v7().to_string(),
             metadata: thread_metadata(),
         }
     }

@@ -4,6 +4,7 @@ use crate::config::AgentRoleConfig;
 use crate::config::DEFAULT_AGENT_MAX_DEPTH;
 use crate::function_tool::FunctionCallError;
 use crate::init_state_db;
+use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::session_prefix::format_inter_agent_completion_message;
 use crate::thread_manager::thread_store_from_config;
@@ -73,8 +74,10 @@ fn invocation(
     tool_name: &str,
     payload: ToolPayload,
 ) -> ToolInvocation {
+    let step_context = StepContext::for_test(Arc::clone(&turn));
     ToolInvocation {
         session,
+        step_context,
         turn,
         cancellation_token: CancellationToken::new(),
         tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
@@ -1198,11 +1201,6 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
                         && communication.other_recipients.is_empty()
                         && communication.content.is_empty()
                         && communication.encrypted_content.as_deref() == Some("encrypted-spawn-message")
-                        && communication
-                            .metadata
-                            .as_ref()
-                            .and_then(|metadata| metadata.source_call_id.as_deref())
-                            == Some("call-1")
                         && communication.trigger_turn
             )
     }));
@@ -1230,11 +1228,6 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
                         && communication.other_recipients.is_empty()
                         && communication.content.is_empty()
                         && communication.encrypted_content.as_deref() == Some("encrypted-send-message")
-                        && communication
-                            .metadata
-                            .as_ref()
-                            .and_then(|metadata| metadata.source_call_id.as_deref())
-                            == Some("call-1")
                         && !communication.trigger_turn
             )
     }));
@@ -2048,11 +2041,6 @@ async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn()
                     if communication.author == AgentPath::root()
                         && communication.recipient == worker_path
                         && communication.encrypted_content.as_deref() == Some("continue")
-                        && communication
-                            .metadata
-                            .as_ref()
-                            .and_then(|metadata| metadata.source_call_id.as_deref())
-                            == Some("call-1")
                         && communication.trigger_turn
             )
     }));
@@ -2831,7 +2819,7 @@ async fn resume_agent_restores_closed_agent_and_accepts_send_input() {
                     text: "materialized".to_string(),
                 }],
                 phase: None,
-                metadata: None,
+                internal_chat_message_metadata_passthrough: None,
             })]),
             AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy")),
             /*parent_trace*/ None,

@@ -109,8 +109,8 @@ pub struct RolloutBudgetConfigToml {
     #[schemars(range(min = 1))]
     pub limit_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 1))]
-    pub reminder_interval_tokens: Option<i64>,
+    /// Remaining weighted-token values that trigger reminders when crossed.
+    pub reminder_at_remaining_tokens: Option<Vec<i64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0))]
     pub sampling_token_weight: Option<f64>,
@@ -144,7 +144,7 @@ pub struct CurrentTimeReminderConfigToml {
     pub enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1))]
-    pub reminder_interval_model_requests: Option<u64>,
+    pub reminder_interval_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clock_source: Option<CurrentTimeSource>,
 }
