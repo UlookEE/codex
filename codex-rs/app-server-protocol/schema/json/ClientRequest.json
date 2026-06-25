@@ -1619,6 +1619,12 @@
             "null"
           ]
         },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "timeoutSecs": {
           "format": "int64",
           "type": [
@@ -1720,6 +1726,13 @@
           "default": [],
           "items": {
             "$ref": "#/definitions/SessionMigration"
+          },
+          "type": "array"
+        },
+        "skills": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/SkillMigration"
           },
           "type": "array"
         },
@@ -3404,6 +3417,17 @@
       },
       "required": [
         "model"
+      ],
+      "type": "object"
+    },
+    "SkillMigration": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
