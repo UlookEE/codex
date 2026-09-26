@@ -1,11 +1,38 @@
 use crate::ModelsManagerConfig;
 use crate::manager::ModelsManager;
+use crate::model_info::with_catalog_overrides;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::TruncationPolicyConfig;
+use codex_protocol::protocol::MultiAgentVersion;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::TestModelsEndpoint;
 use super::openai_manager_for_tests;
+use super::remote_model;
+
+#[test]
+fn luna_catalog_override_enables_ultra_and_uses_max_reasoning() {
+    let luna = with_catalog_overrides(remote_model("gpt-6-luna", "GPT-6 Luna", 0));
+
+    assert_eq!(
+        luna.supported_reasoning_levels
+            .iter()
+            .map(|preset| preset.effort.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::Max,
+            ReasoningEffort::Ultra,
+        ]
+    );
+    assert_eq!(luna.multi_agent_version, Some(MultiAgentVersion::V2));
+    assert_eq!(
+        luna.resolve_reasoning_effort(ReasoningEffort::Ultra),
+        ReasoningEffort::Max
+    );
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn offline_model_info_without_tool_output_override() {

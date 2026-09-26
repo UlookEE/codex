@@ -168,7 +168,11 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     fn build_available_models(&self, mut remote_models: Vec<ModelInfo>) -> Vec<ModelPreset> {
         remote_models.sort_by_key(|model| model.priority);
 
-        let mut presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
+        let mut presets: Vec<ModelPreset> = remote_models
+            .into_iter()
+            .map(model_info::with_catalog_overrides)
+            .map(Into::into)
+            .collect();
         let uses_codex_backend = self
             .auth_manager()
             .is_some_and(AuthManager::current_auth_uses_codex_backend);
@@ -797,6 +801,7 @@ pub(crate) fn construct_model_info_from_candidates(
     } else {
         model_info::model_info_from_slug(model)
     };
+    let model_info = model_info::with_catalog_overrides(model_info);
     model_info::with_config_overrides(model_info, config)
 }
 

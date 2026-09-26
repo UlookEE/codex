@@ -4,10 +4,13 @@ use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::openai_models::TruncationMode;
 use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::openai_models::WebSearchToolType;
 use codex_protocol::openai_models::default_input_modalities;
+use codex_protocol::protocol::MultiAgentVersion;
 
 use crate::config::ModelsManagerConfig;
 use codex_utils_output_truncation::approx_bytes_for_tokens;
@@ -15,6 +18,40 @@ use tracing::warn;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
+
+pub(crate) fn with_catalog_overrides(mut model: ModelInfo) -> ModelInfo {
+    if model.slug != "gpt-6-luna" {
+        return model;
+    }
+
+    if !model
+        .supported_reasoning_levels
+        .iter()
+        .any(|preset| preset.effort == ReasoningEffort::Max)
+    {
+        model
+            .supported_reasoning_levels
+            .push(ReasoningEffortPreset {
+                effort: ReasoningEffort::Max,
+                description: "Maximum reasoning depth for the hardest problems".to_string(),
+            });
+    }
+    if !model
+        .supported_reasoning_levels
+        .iter()
+        .any(|preset| preset.effort == ReasoningEffort::Ultra)
+    {
+        model
+            .supported_reasoning_levels
+            .push(ReasoningEffortPreset {
+                effort: ReasoningEffort::Ultra,
+                description: "Maximum reasoning with automatic task delegation".to_string(),
+            });
+    }
+    model.multi_agent_version = Some(MultiAgentVersion::V2);
+
+    model
+}
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
     if let Some(context_window) = config.model_context_window {
