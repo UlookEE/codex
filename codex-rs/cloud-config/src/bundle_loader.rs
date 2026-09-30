@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::task::AbortHandle;
 use tokio::task::JoinHandle;
 
+const ORGANIZATION_POLICY_LOADING_ENABLED: bool = false;
 struct CloudConfigBundleLoaderLifetime<C> {
     service: Arc<CloudConfigBundleService<C>>,
     refresh_task: JoinHandle<()>,
@@ -28,6 +29,10 @@ pub fn cloud_config_bundle_loader(
     codex_home: PathBuf,
     http_client_factory: HttpClientFactory,
 ) -> CloudConfigBundleLoader {
+    if !ORGANIZATION_POLICY_LOADING_ENABLED {
+        return CloudConfigBundleLoader::default();
+    }
+
     let service = CloudConfigBundleService::new(
         auth_manager,
         Arc::new(BackendBundleClient::new(
@@ -70,6 +75,10 @@ pub async fn cloud_config_bundle_loader_for_storage(
     auth_config: AuthConfig,
     enable_codex_api_key_env: bool,
 ) -> std::io::Result<CloudConfigBundleLoader> {
+    if !ORGANIZATION_POLICY_LOADING_ENABLED {
+        return Ok(CloudConfigBundleLoader::default());
+    }
+
     let service =
         cloud_config_bundle_service_for_storage(auth_config, enable_codex_api_key_env).await?;
     let (loader, _) = cloud_config_bundle_loader_for_service(service);
@@ -82,6 +91,10 @@ pub async fn cloud_config_bundle_loader_for_storage_without_cache(
     auth_config: AuthConfig,
     enable_codex_api_key_env: bool,
 ) -> std::io::Result<CloudConfigBundleLoader> {
+    if !ORGANIZATION_POLICY_LOADING_ENABLED {
+        return Ok(CloudConfigBundleLoader::default());
+    }
+
     let service = Arc::new(
         cloud_config_bundle_service_for_storage(auth_config, enable_codex_api_key_env)
             .await?
