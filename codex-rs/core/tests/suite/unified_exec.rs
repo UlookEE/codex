@@ -1012,6 +1012,81 @@ async fn unified_exec_emits_exec_command_end_event() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn write_stdin_default_buffers_progress_until_background_timeout() -> Result<()> {
+    skip_if_target_windows!(Ok(()), "uses POSIX sleep and printf");
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex().with_config(|config| {
+        config.background_terminal_max_timeout = 10_000;
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+
+    let start_call_id = "uexec-default-poll-start";
+    let poll_call_id = "uexec-default-poll";
+    let finish_call_id = "uexec-default-poll-finish";
+    let start_args = json!({
+        "cmd": "sleep 1; printf 'POLL-PROGRESS\\n'; sleep 11",
+        "yield_time_ms": 250,
+    });
+    let poll_args = json!({ "session_id": 1000 });
+    let finish_args = json!({
+        "session_id": 1000,
+        "yield_time_ms": 5_000,
+    });
+
+    mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(start_call_id, "exec_command", &start_args.to_string()),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(poll_call_id, "write_stdin", &poll_args.to_string()),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_function_call(finish_call_id, "write_stdin", &finish_args.to_string()),
+                ev_completed("resp-3"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-4"),
+                ev_assistant_message("msg-1", "finished"),
+                ev_completed("resp-4"),
+            ]),
+        ],
+    )
+    .await;
+
+    submit_unified_exec_turn(
+        &test,
+        "buffer background progress",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+
+    let start_output = wait_for_raw_unified_exec_output(&test, start_call_id).await?;
+    assert!(start_output.process_id.is_some());
+
+    let poll_output = wait_for_raw_unified_exec_output(&test, poll_call_id).await?;
+    assert!(poll_output.wall_time_seconds >= 9.0);
+    assert!(poll_output.output.contains("POLL-PROGRESS"));
+
+    let finish_output = wait_for_raw_unified_exec_output(&test, finish_call_id).await?;
+    assert_eq!(finish_output.exit_code, Some(0));
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unified_exec_emits_output_delta_for_exec_command() -> Result<()> {
     // TODO(anp): Remove after unified-exec fixtures use target-native commands.
     skip_if_target_windows!(Ok(()), "uses a POSIX-only command fixture");
