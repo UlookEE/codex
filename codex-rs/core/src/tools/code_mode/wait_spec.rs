@@ -3,6 +3,8 @@ use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
 use std::collections::BTreeMap;
 
+use codex_code_mode::DEFAULT_WAIT_YIELD_TIME_MS;
+
 pub(crate) fn create_wait_tool(
     description_override: Option<&str>,
     parameters_override: Option<&str>,
@@ -14,9 +16,9 @@ pub(crate) fn create_wait_tool(
         ),
         (
             "yield_time_ms".to_string(),
-            JsonSchema::number(Some(
-                "Wait before yielding more output. Defaults to 10000 ms.".to_string(),
-            )),
+            JsonSchema::number(Some(format!(
+                "Wait before yielding more output. Defaults to {DEFAULT_WAIT_YIELD_TIME_MS} ms."
+            ))),
         ),
         (
             "max_tokens".to_string(),
@@ -111,7 +113,7 @@ mod tests {
                         (
                             "yield_time_ms".to_string(),
                             JsonSchema::number(Some(
-                                "Wait before yielding more output. Defaults to 10000 ms."
+                                "Wait before yielding more output. Defaults to 300000 ms."
                                     .to_string(),
                             )),
                         ),
